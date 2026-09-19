@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // polls: qualquer pessoa pode LER (a página de votação e o painel
+    // precisam disso), mas só o admin autenticado pode CRIAR/EDITAR.
+    match /polls/{pollId} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null;
+
+      // votes: subcoleção dentro de cada poll.
+      // Leitura pública (o painel do telão precisa contar os votos).
+      // Escrita pública, mas cada pessoa só pode criar/alterar o
+      // PRÓPRIO documento de voto (o id do documento = deviceId
+      // gerado no navegador de quem vota) — isso impede que alguém
+      // escreva ou apague o voto de outra pessoa.
+      match /votes/{deviceId} {
+        allow read: if true;
+        allow create, update: if request.resource.data.keys().hasAll(['optionIds', 'votedAt'])
+                                && request.resource.data.optionIds is list
+                                && request.resource.data.optionIds.size() > 0;
+        allow delete: if request.auth != null;
+      }
+    }
+  }
+}

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Admin — Votação</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root { --green: #0f6e56; --bg: #f6f5f1; --card: #ffffff; --border: #ddd8cc; --text: #2c2c2a; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 20px; }
+  .wrap { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+  .sub { color: #777; font-size: 14px; margin-bottom: 24px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+  label { display: block; font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+  input[type=text], input[type=email], input[type=password], select {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 15px; background: #fff;
+  }
+  button { cursor: pointer; border: none; border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; }
+  .btn-primary { background: var(--green); color: #fff; }
+  .btn-secondary { background: #eee; color: var(--text); }
+  .btn-danger { background: #b3261e; color: #fff; }
+  .option-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+  .option-row input { flex: 1; }
+  .option-row button { padding: 8px 10px; }
+  .poll-item { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .poll-item h3 { margin: 0 0 6px; font-size: 16px; }
+  .status { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-left: 6px; }
+  .status.aberta { background: #e6f4ea; color: #1e7e34; }
+  .status.rascunho { background: #f1eee6; color: #8a7a4b; }
+  .status.encerrada { background: #f8e6e6; color: #a33; }
+  .poll-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .link-box { font-size: 13px; word-break: break-all; background: #f6f5f1; padding: 8px; border-radius: 6px; margin-top: 8px; }
+  #qrWrap { margin-top: 10px; display: flex; justify-content: center; }
+  #loginCard, #appArea { display: none; }
+  .hint { font-size: 12px; color: #888; margin-top: 4px; }
+  .error { color: #b3261e; font-size: 13px; margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Painel administrativo</h1>
+  <div class="sub">Criação e controle das votações</div>
+
+  <div class="card" id="loginCard">
+    <label>E-mail</label>
+    <input type="email" id="loginEmail">
+    <label>Senha</label>
+    <input type="password" id="loginPass">
+    <div style="margin-top:16px;">
+      <button class="btn-primary" onclick="doLogin()">Entrar</button>
+    </div>
+    <div class="error" id="loginError"></div>
+  </div>
+
+  <div id="appArea">
+    <div class="card">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong id="whoami"></strong>
+        <button class="btn-secondary" onclick="doLogout()">Sair</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:16px; margin-top:0;">Nova votação</h2>
+      <label>Pergunta</label>
+      <input type="text" id="pollQuestion" placeholder="Ex: Qual é a melhor tenda da Festa das Nações?">
+
+      <label>Tipo</label>
+      <select id="pollType">
+        <option value="single">Seleção única (a pessoa escolhe 1)</option>
+        <option value="multi">Múltipla escolha (a pessoa pode escolher mais de 1)</option>
+      </select>
+
+      <label>Opções</label>
+      <div id="optionsList"></div>
+      <button class="btn-secondary" onclick="addOptionField()">+ adicionar opção</button>
+
+      <div style="margin-top:18px;">
+        <button class="btn-primary" onclick="createPoll()">Criar votação</button>
+      </div>
+      <div class="error" id="createError"></div>
+    </div>
+
+    <div class="card">
+      <h2 style="font-size:16px; margin-top:0;">Votações existentes</h2>
+      <div id="pollsList"></div>
+    </div>
+  </div>
+</div>
+
+<script src="firebase-config.js"></script>
+<script>
+let optionCount = 0;
+
+function addOptionField(value) {
+  optionCount++;
+  const div = document.createElement('div');
+  div.className = 'option-row';
+  div.id = 'opt-' + optionCount;
+  div.innerHTML = `
+    <input type="text" placeholder="Opção ${optionCount}" value="${value ? value.replace(/"/g,'&quot;') : ''}">
+    <button class="btn-secondary" onclick="document.getElementById('opt-${optionCount}').remove()">✕</button>
+  `;
+  document.getElementById('optionsList').appendChild(div);
+}
+
+// começa com 2 campos vazios
+addOptionField();
+addOptionField();
+
+function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  document.getElementById('loginError').textContent = '';
+  auth.signInWithEmailAndPassword(email, pass).catch(err => {
+    document.getElementById('loginError').textContent = 'Não foi possível entrar: ' + err.message;
+  });
+}
+
+function doLogout() {
+  auth.signOut();
+}
+
+auth.onAuthStateChanged(user => {
+  if (user) {
+    document.getElementById('loginCard').style.display = 'none';
+    document.getElementById('appArea').style.display = 'block';
+    document.getElementById('whoami').textContent = user.email;
+    loadPolls();
+  } else {
+    document.getElementById('loginCard').style.display = 'block';
+    document.getElementById('appArea').style.display = 'none';
+  }
+});
+
+async function createPoll() {
+  const question = document.getElementById('pollQuestion').value.trim();
+  const type = document.getElementById('pollType').value;
+  const errEl = document.getElementById('createError');
+  errEl.textContent = '';
+
+  const optionInputs = [...document.querySelectorAll('#optionsList input')];
+  const options = optionInputs.map(i => i.value.trim()).filter(v => v.length > 0);
+
+  if (!question) { errEl.textContent = 'Digite a pergunta.'; return; }
+  if (options.length < 2) { errEl.textContent = 'Adicione pelo menos 2 opções.'; return; }
+
+  const optionsData = options.map((label, idx) => ({ id: 'opt' + idx, label }));
+
+  try {
+    await db.collection('polls').add({
+      question,
+      type,
+      options: optionsData,
+      status: 'rascunho',
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: auth.currentUser.email
+    });
+    document.getElementById('pollQuestion').value = '';
+    document.getElementById('optionsList').innerHTML = '';
+    optionCount = 0;
+    addOptionField();
+    addOptionField();
+  } catch (err) {
+    errEl.textContent = 'Erro ao criar: ' + err.message;
+  }
+}
+
+function loadPolls() {
+  db.collection('polls').orderBy('createdAt', 'desc').onSnapshot(snap => {
+    const list = document.getElementById('pollsList');
+    list.innerHTML = '';
+    if (snap.empty) {
+      list.innerHTML = '<div class="hint">Nenhuma votação criada ainda.</div>';
+      return;
+    }
+    snap.forEach(doc => {
+      const p = doc.data();
+      const id = doc.id;
+      const voteUrl = location.origin + location.pathname.replace('admin.html', 'vote.html') + '?poll=' + id;
+      const dashUrl = location.origin + location.pathname.replace('admin.html', 'dashboard.html') + '?poll=' + id;
+
+      const div = document.createElement('div');
+      div.className = 'poll-item';
+      div.innerHTML = `
+        <h3>${escapeHtml(p.question)} <span class="status ${p.status}">${p.status}</span></h3>
+        <div class="hint">${p.type === 'single' ? 'Seleção única' : 'Múltipla escolha'} · ${p.options.length} opções</div>
+        <div class="poll-actions">
+          ${p.status !== 'aberta' ? `<button class="btn-primary" onclick="setStatus('${id}','aberta')">Abrir votação</button>` : ''}
+          ${p.status === 'aberta' ? `<button class="btn-danger" onclick="setStatus('${id}','encerrada')">Encerrar</button>` : ''}
+          ${p.status === 'encerrada' ? `<button class="btn-secondary" onclick="setStatus('${id}','aberta')">Reabrir</button>` : ''}
+          <button class="btn-secondary" onclick="toggleQr('${id}')">QR code</button>
+          <a href="${dashUrl}" target="_blank"><button class="btn-secondary" type="button">Abrir painel (telão)</button></a>
+          <button class="btn-danger" onclick="deletePoll('${id}')">Excluir</button>
+        </div>
+        <div class="link-box">${voteUrl}</div>
+        <div id="qr-${id}" style="display:none;">
+          <div id="qrWrap-${id}" style="margin-top:10px; display:flex; justify-content:center;"></div>
+        </div>
+      `;
+      list.appendChild(div);
+    });
+  });
+}
+
+function setStatus(id, status) {
+  db.collection('polls').doc(id).update({ status });
+}
+
+function deletePoll(id) {
+  if (!confirm('Excluir esta votação e todos os votos? Essa ação não pode ser desfeita.')) return;
+  db.collection('polls').doc(id).delete();
+}
+
+const qrGenerated = {};
+function toggleQr(id) {
+  const box = document.getElementById('qr-' + id);
+  const isHidden = box.style.display === 'none';
+  box.style.display = isHidden ? 'block' : 'none';
+  if (isHidden && !qrGenerated[id]) {
+    const voteUrl = location.origin + location.pathname.replace('admin.html', 'vote.html') + '?poll=' + id;
+    new QRCode(document.getElementById('qrWrap-' + id), { text: voteUrl, width: 180, height: 180 });
+    qrGenerated[id] = true;
+  }
+}
+
+function escapeHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+</script>
+</body>
+</html>
